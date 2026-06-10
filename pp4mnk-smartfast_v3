@@ -1,0 +1,158 @@
+#!/bin/sh
+# =========================================================
+# pp4mnk-boot-optimizer MAX SPEED SSD edition
+# Optimized for EasyOS
+# Target: Intel i5-680 + 11.4 GB RAM + SSD
+# Maximum speed with controlled temperature
+# =========================================================
+
+LOG="/tmp/pp4mnk-maxspeed.log"
+
+echo "==== $(date) ====" > "$LOG"
+echo "Starting pp4mnk MAX SPEED SSD optimizer..." >> "$LOG"
+
+# ---------------------------------------------------------
+# Wait until system settles
+# ---------------------------------------------------------
+sleep 4
+
+log() {
+    echo "$1" >> "$LOG"
+}
+
+setval() {
+    FILE="$1"
+    VALUE="$2"
+
+    if [ -e "$FILE" ]; then
+        echo "$VALUE" > "$FILE" 2>/dev/null && log "OK $FILE = $VALUE"
+    fi
+}
+
+# ---------------------------------------------------------
+# MEMORY TUNING
+# ---------------------------------------------------------
+log "Memory tuning"
+
+# Low swap use
+setval /proc/sys/vm/swappiness 10
+
+# Keep filesystem cache longer for faster app and browser access
+setval /proc/sys/vm/vfs_cache_pressure 30
+
+# Faster desktop writeback, still controlled for SSD
+setval /proc/sys/vm/dirty_background_ratio 5
+setval /proc/sys/vm/dirty_ratio 10
+
+# Reduce swap read clustering
+setval /proc/sys/vm/page-cluster 0
+
+# Disable laptop-style delayed writes
+setval /proc/sys/vm/laptop_mode 0
+
+# Keep a healthier free-memory reserve for smoother responsiveness
+setval /proc/sys/vm/min_free_kbytes 131072
+
+# Smoother periodic flushes
+setval /proc/sys/vm/dirty_writeback_centisecs 1500
+setval /proc/sys/vm/dirty_expire_centisecs 3000
+
+# ---------------------------------------------------------
+# CPU TUNING
+# ---------------------------------------------------------
+log "CPU tuning"
+
+for CPU in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+do
+    [ -f "$CPU" ] || continue
+    AVAIL="$(dirname "$CPU")/scaling_available_governors"
+
+    if [ -f "$AVAIL" ]; then
+        if grep -qw schedutil "$AVAIL"; then
+            echo schedutil > "$CPU" 2>/dev/null && log "CPU governor set to schedutil on $CPU"
+        elif grep -qw ondemand "$AVAIL"; then
+            echo ondemand > "$CPU" 2>/dev/null && log "CPU governor set to ondemand on $CPU"
+        elif grep -qw conservative "$AVAIL"; then
+            echo conservative > "$CPU" 2>/dev/null && log "CPU governor set to conservative on $CPU"
+        fi
+    fi
+done
+
+# ---------------------------------------------------------
+# DISK / SSD TUNING
+# ---------------------------------------------------------
+log "SSD tuning"
+
+for DEVPATH in /sys/block/*
+do
+    DEV="$(basename "$DEVPATH")"
+
+    case "$DEV" in
+        loop*|ram*|zram*|dm-*|sr*)
+            continue
+        ;;
+    esac
+
+    # Good SSD responsiveness
+    [ -f "$DEVPATH/queue/read_ahead_kb" ] && \
+        echo 64 > "$DEVPATH/queue/read_ahead_kb" 2>/dev/null && \
+        log "Set read_ahead_kb=64 on $DEV"
+
+    # Prefer fast/light schedulers
+    if [ -f "$DEVPATH/queue/scheduler" ]; then
+        if grep -qw mq-deadline "$DEVPATH/queue/scheduler"; then
+            echo mq-deadline > "$DEVPATH/queue/scheduler" 2>/dev/null && \
+            log "Set scheduler=mq-deadline on $DEV"
+        elif grep -qw none "$DEVPATH/queue/scheduler"; then
+            echo none > "$DEVPATH/queue/scheduler" 2>/dev/null && \
+            log "Set scheduler=none on $DEV"
+        elif grep -qw noop "$DEVPATH/queue/scheduler"; then
+            echo noop > "$DEVPATH/queue/scheduler" 2>/dev/null && \
+            log "Set scheduler=noop on $DEV"
+        fi
+    fi
+done
+
+# ---------------------------------------------------------
+# NETWORK TUNING
+# ---------------------------------------------------------
+log "Network tuning"
+
+setval /proc/sys/net/core/somaxconn 1024
+setval /proc/sys/net/ipv4/tcp_fin_timeout 15
+setval /proc/sys/net/ipv4/tcp_tw_reuse 1
+setval /proc/sys/net/ipv4/tcp_fastopen 3
+setval /proc/sys/net/ipv4/tcp_mtu_probing 1
+
+# ---------------------------------------------------------
+# GUI RESPONSIVENESS
+# ---------------------------------------------------------
+log "Boost GUI responsiveness"
+
+for P in Xorg X jwm rox rox-filer
+do
+    PID="$(pidof "$P" 2>/dev/null | awk '{print $1}')"
+    if [ -n "$PID" ]; then
+        renice -n -2 -p "$PID" >/dev/null 2>&1 && log "Boosted $P"
+    fi
+done
+
+# ---------------------------------------------------------
+# BROWSER BOOST
+# ---------------------------------------------------------
+log "Browser boost"
+
+for B in slimjet firefox chromium chrome opera
+do
+    PID="$(pidof "$B" 2>/dev/null | awk '{print $1}')"
+    if [ -n "$PID" ]; then
+        renice -n -8 -p "$PID" >/dev/null 2>&1 && log "Reniced browser $B"
+        ionice -c 2 -n 1 -p "$PID" >/dev/null 2>&1 && log "Ioniced browser $B"
+    fi
+done
+
+# ---------------------------------------------------------
+# FINISH
+# ---------------------------------------------------------
+log "pp4mnk MAX SPEED SSD optimization complete"
+exit 0
