@@ -1,3 +1,5 @@
+DOWNLOAD AT SOURCEFORGE https://sourceforge.net/projects/f96ce-xfce-fusilli/
+
 # XFCE-FUSILLI
 XFCE_FUSILLI es una personalización avanzada de escritorio basada en XFCE + Fusilli .  El objetivo del proyecto es demostrar que un escritorio Linux puede ser atractivo a la vez que rápido.
 
@@ -171,3 +173,8 @@ O incluso:
 O una definición muy pp4mnk:
 
 > **XFCE_FUSILLI: brutal speed, minimal design, maximum RAM.** 🚀
+>
+> PUEDES ENCONTRAR ESTE Y MUCHOS MÁS DE MIS PROYECTOS EN:
+>
+>  https://sourceforge.net/u/pp4mnk/profile
+>  https://archive.org/search?query=PP4MNK&tab=all
