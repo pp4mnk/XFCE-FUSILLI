@@ -1,0 +1,4 @@
+#!/bin/sh
+# Set suspend:
+
+echo -n mem >/sys/power/state
