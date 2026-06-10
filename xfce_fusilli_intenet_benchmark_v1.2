@@ -1,0 +1,231 @@
+#!/bin/sh
+# =========================================================
+# XFCE_FUSILLI INTERNET BENCHMARK v1.2 FINAL
+# pp4mnk style · Minimal · Fast · Functional
+# =========================================================
+
+LOG="/tmp/xfce_fusilli-internet-benchmark-v1.2-final.log"
+URL_DL="http://ipv4.download.thinkbroadband.com/100MB.zip"
+
+: > "$LOG"
+
+have_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+safe_echo() {
+    echo "$1" | tee -a "$LOG"
+}
+
+section() {
+    safe_echo "=================================================="
+    safe_echo "$1"
+    safe_echo "=================================================="
+}
+
+to_mbps() {
+    VAL="$1"
+    UNIT="$2"
+    awk -v v="$VAL" -v u="$UNIT" 'BEGIN{
+        if (u=="MiB/s" || u=="MB/s") printf "%.2f", v*8
+        else if (u=="KiB/s" || u=="KB/s") printf "%.2f", (v/1024)*8
+        else if (u=="GiB/s" || u=="GB/s") printf "%.2f", v*1024*8
+        else printf "%.2f", v
+    }'
+}
+
+score_label() {
+    SCORE="$1"
+    if [ "$SCORE" -ge 90 ]; then
+        echo "EXCELLENT"
+    elif [ "$SCORE" -ge 75 ]; then
+        echo "VERY GOOD"
+    elif [ "$SCORE" -ge 60 ]; then
+        echo "GOOD"
+    elif [ "$SCORE" -ge 40 ]; then
+        echo "FAIR"
+    else
+        echo "BASIC"
+    fi
+}
+
+safe_echo "=================================================="
+safe_echo "   XFCE_FUSILLI INTERNET BENCHMARK v1.2 FINAL"
+safe_echo "=================================================="
+safe_echo ""
+
+# ---------------------------------------------------------
+# 1) Network interface
+# ---------------------------------------------------------
+section "1) NETWORK INTERFACE"
+
+IFACE="$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')"
+[ -n "$IFACE" ] || IFACE="unknown"
+
+safe_echo "Active interface : $IFACE"
+
+if have_cmd ethtool && [ "$IFACE" != "unknown" ]; then
+    DRIVER="$(ethtool -i "$IFACE" 2>/dev/null | awk '/driver:/ {print $2}')"
+    SPEED="$(ethtool "$IFACE" 2>/dev/null | awk '/Speed:/ {print $2}')"
+    safe_echo "Driver           : ${DRIVER:-unknown}"
+    safe_echo "Speed            : ${SPEED:-unknown}"
+fi
+safe_echo ""
+
+# ---------------------------------------------------------
+# 2) Latency test
+# ---------------------------------------------------------
+section "2) LATENCY TEST (PING)"
+
+PING_RAW="$(ping -c 10 1.1.1.1 2>/dev/null)"
+PING_LINE="$(echo "$PING_RAW" | tail -1)"
+LOSS_LINE="$(echo "$PING_RAW" | grep 'packet loss' | tail -1)"
+
+safe_echo "${PING_LINE:-ping failed}"
+[ -n "$LOSS_LINE" ] && safe_echo "$LOSS_LINE"
+
+PING_STATS="$(echo "$PING_LINE" | sed 's/.*= //; s/ ms//')"
+PING_MIN="$(echo "$PING_STATS" | cut -d/ -f1)"
+PING_AVG="$(echo "$PING_STATS" | cut -d/ -f2)"
+PING_MAX="$(echo "$PING_STATS" | cut -d/ -f3)"
+PING_LOSS="$(echo "$LOSS_LINE" | awk -F', ' '{print $3}' | awk '{print $1}')"
+
+safe_echo "Ping min         : ${PING_MIN:-N/A} ms"
+safe_echo "Ping avg         : ${PING_AVG:-N/A} ms"
+safe_echo "Ping max         : ${PING_MAX:-N/A} ms"
+safe_echo "Packet loss      : ${PING_LOSS:-N/A}"
+safe_echo ""
+
+# ---------------------------------------------------------
+# 3) DNS performance
+# ---------------------------------------------------------
+section "3) DNS PERFORMANCE"
+
+if have_cmd nslookup; then
+    DNS_TIME_RAW="$((time nslookup google.com >/dev/null) 2>&1 | awk '/real/ {print $2}')"
+    safe_echo "DNS lookup time  : ${DNS_TIME_RAW:-N/A}"
+else
+    safe_echo "nslookup not available"
+fi
+
+safe_echo ""
+safe_echo "DNS servers:"
+grep '^nameserver' /etc/resolv.conf 2>/dev/null | tee -a "$LOG"
+safe_echo ""
+
+# ---------------------------------------------------------
+# 4) Download speed
+# ---------------------------------------------------------
+section "4) DOWNLOAD SPEED TEST"
+
+RATE=""
+RATE_VAL=""
+RATE_UNIT=""
+RATE_MBPS=""
+
+if have_cmd aria2c; then
+    OUT="$(aria2c -x16 -s16 -k1M --file-allocation=none -d /tmp -o speedtest.bin "$URL_DL" 2>&1)"
+    RATE="$(echo "$OUT" | tr '\r' '\n' | grep -oE '[0-9]+(\.[0-9]+)?(KiB/s|MiB/s|GiB/s|KB/s|MB/s|GB/s)' | tail -n1)"
+elif have_cmd wget; then
+    OUT="$(wget -O /dev/null "$URL_DL" 2>&1)"
+    RATE="$(echo "$OUT" | tr '\r' '\n' | grep -oE '[0-9]+(\.[0-9]+)?(KiB/s|MiB/s|GiB/s|KB/s|MB/s|GB/s)' | tail -n1)"
+else
+    safe_echo "aria2c/wget not available"
+fi
+
+rm -f /tmp/speedtest.bin
+
+if [ -n "$RATE" ]; then
+    RATE_VAL="$(echo "$RATE" | sed -E 's/^([0-9]+(\.[0-9]+)?).*/\1/')"
+    RATE_UNIT="$(echo "$RATE" | sed -E 's/^[0-9]+(\.[0-9]+)?//')"
+    RATE_MBPS="$(to_mbps "$RATE_VAL" "$RATE_UNIT")"
+
+    safe_echo "Download speed   : $RATE"
+    safe_echo "Equivalent       : ${RATE_MBPS} Mb/s"
+else
+    safe_echo "Download speed   : could not parse"
+fi
+
+safe_echo ""
+
+# ---------------------------------------------------------
+# 5) Connection score
+# ---------------------------------------------------------
+section "5) CONNECTION SCORE"
+
+SCORE=0
+
+# Ping score
+if [ -n "$PING_AVG" ]; then
+    if awk "BEGIN{exit !($PING_AVG < 10)}"; then
+        SCORE=$((SCORE + 35))
+    elif awk "BEGIN{exit !($PING_AVG < 20)}"; then
+        SCORE=$((SCORE + 28))
+    elif awk "BEGIN{exit !($PING_AVG < 35)}"; then
+        SCORE=$((SCORE + 20))
+    else
+        SCORE=$((SCORE + 10))
+    fi
+fi
+
+# Packet loss score
+if [ -n "$PING_LOSS" ]; then
+    case "$PING_LOSS" in
+        0%|0.0%) SCORE=$((SCORE + 15)) ;;
+        1%|1.0%) SCORE=$((SCORE + 10)) ;;
+        *) SCORE=$((SCORE + 0)) ;;
+    esac
+fi
+
+# Download score
+if [ -n "$RATE_MBPS" ]; then
+    if awk "BEGIN{exit !($RATE_MBPS >= 850)}"; then
+        SCORE=$((SCORE + 50))
+    elif awk "BEGIN{exit !($RATE_MBPS >= 700)}"; then
+        SCORE=$((SCORE + 42))
+    elif awk "BEGIN{exit !($RATE_MBPS >= 500)}"; then
+        SCORE=$((SCORE + 34))
+    elif awk "BEGIN{exit !($RATE_MBPS >= 300)}"; then
+        SCORE=$((SCORE + 24))
+    else
+        SCORE=$((SCORE + 15))
+    fi
+fi
+
+[ "$SCORE" -gt 100 ] && SCORE=100
+LEVEL="$(score_label "$SCORE")"
+
+safe_echo "Internet score    : $SCORE / 100"
+safe_echo "Level             : $LEVEL"
+safe_echo ""
+
+# ---------------------------------------------------------
+# 6) Conclusion
+# ---------------------------------------------------------
+section "6) CONCLUSION"
+
+if [ -n "$RATE_MBPS" ] && awk "BEGIN{exit !($RATE_MBPS >= 700)}"; then
+    safe_echo "- Download performance is strong for a gigabit-class connection."
+elif [ -n "$RATE_MBPS" ] && awk "BEGIN{exit !($RATE_MBPS >= 450)}"; then
+    safe_echo "- Download performance is decent, but below the expected ceiling for 1 Gbps."
+elif [ -n "$RATE_MBPS" ]; then
+    safe_echo "- Download performance is clearly below what a 1 Gbps link can usually deliver."
+fi
+
+if [ -n "$PING_AVG" ] && awk "BEGIN{exit !($PING_AVG < 20)}"; then
+    safe_echo "- Latency is good."
+else
+    safe_echo "- Latency is acceptable, but not especially low."
+fi
+
+if [ "$IFACE" = "eth1" ]; then
+    safe_echo "- Active path is using the Intel NIC."
+fi
+
+safe_echo ""
+safe_echo "Log saved to: $LOG"
+safe_echo ""
+safe_echo "Done."
+echo ""
+echo "Press ENTER to exit..."
+read dummy
